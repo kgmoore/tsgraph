@@ -26,3 +26,7 @@
 *.exe
 *.out
 *.app
+tsgraph
+
+#Media Folders
+media
