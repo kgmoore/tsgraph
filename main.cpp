@@ -7,27 +7,98 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <map>
+
+using namespace std;
+
+#include <bitstream/mpeg/ts.h>
+
+#define MPEG_PACKET_SENTINAL 0x47
+#define MPEG_PACKET_SIZE 188
+#define RTP_HEADER_SENTINAL 0x80
+#define RTP_HEADER_SIZE 12
+
 void print_usage()
 {
 	printf("USAGE: tsgraph dest_ip dest_port interface_ip\n");
 }
 
 int sd;
-unsigned char buffer[2048];
+uint8_t buffer[2048];
+uint32_t mpeg_packets_received = 0;
 
-void read_packets()
+map<uint16_t,uint32_t> pid_histogram;
+
+void print_pid_histogram()
 {
-	int retcode;
+	for(const auto& kvp : pid_histogram)
+	{
+		printf("%d:%d ", kvp.first, kvp.second);
+	}
+}
+
+void process_mpeg_packet(uint8_t* packet)
+{
+	mpeg_packets_received++;
+	uint16_t pid = ts_get_pid(packet);
+
+	pid_histogram[pid]++;
+
+	if (ts_has_adaptation(packet))
+	{
+		if (tsaf_has_pcr(packet))
+		{
+			uint64_t pcr = tsaf_get_pcr(packet);
+			printf("PID:%u, packet:%u, pcr:%lu (%f sec)\n", 
+				pid, 
+				mpeg_packets_received,
+				pcr,
+				pcr/ 27000000.0);
+		}
+	}
+}
+
+void read_ip_packets()
+{
+	ssize_t recv_size;
 	static unsigned int packets = 0;
 
-	retcode = read(sd,buffer,sizeof(buffer));
-	packets++;
-
-	if ((packets % 100) == 0) 
+	recv_size = recv(sd,buffer,sizeof(buffer), 0);
+	
+	if (recv_size == 0)
 	{
-		printf("%i packets received.\n",packets);
+		printf("recv returned Zero!\n");
+		return;
 	}
 
+	unsigned int offset = 0;
+
+	// check for an RTP header. skip if found
+	if (buffer[offset] == RTP_HEADER_SENTINAL)
+	{
+		offset += RTP_HEADER_SIZE;
+	}
+
+	while (offset < recv_size)
+	{
+		if (buffer[offset] == MPEG_PACKET_SENTINAL)
+		{
+			process_mpeg_packet(buffer + offset);
+		}
+		else
+		{
+			printf("Expected 0x%02X marker, got 0x%02X\n", MPEG_PACKET_SENTINAL, buffer[offset] );
+		}
+		offset += MPEG_PACKET_SIZE;
+	}
+
+	packets++;
+	if ((packets % 100) == 0) 
+	{
+//		printf("%i ip packets received, %i mpeg packets received. ",packets, mpeg_packets_received);
+//		print_pid_histogram();
+//		printf("\n");
+	}
 }
 
 void open_network_connection(char* dest_ip, char* dest_port, char* interface_ip)
@@ -105,7 +176,7 @@ int main(int argc, char** argv)
 
 	while(1)
 	{
-		read_packets();
+		read_ip_packets();
 	}	
 	
 
