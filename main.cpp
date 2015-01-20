@@ -12,6 +12,7 @@
 using namespace std;
 
 #include <bitstream/mpeg/ts.h>
+#include <bitstream/mpeg/psi.h>
 
 #define MPEG_PACKET_SENTINAL 0x47
 #define MPEG_PACKET_SIZE 188
@@ -37,6 +38,23 @@ void print_pid_histogram()
 	}
 }
 
+void process_pat_packet(uint8_t* packet)
+{
+
+	unsigned int program_index = 0;
+	uint8_t* p_pat_payload = ts_section(packet);
+	printf("Got PID Packet...\n");
+	while(true)
+	{
+		uint8_t* p_pat_n = pat_get_program(p_pat_payload,program_index);
+		if (p_pat_n == 0) break;
+		unsigned int program_number = patn_get_program(p_pat_n);
+		unsigned int pid = patn_get_pid(p_pat_n);
+		printf("\t Program %d at pid 0x%04X.\n",program_number, pid);
+		program_index++;
+	}
+}
+
 void process_mpeg_packet(uint8_t* packet)
 {
 	mpeg_packets_received++;
@@ -49,12 +67,17 @@ void process_mpeg_packet(uint8_t* packet)
 		if (tsaf_has_pcr(packet))
 		{
 			uint64_t pcr = tsaf_get_pcr(packet);
-			printf("PID:%u, packet:%u, pcr:%lu (%f sec)\n", 
+			/* printf("PID:%u, packet:%u, pcr:%lu (%f sec)\n", 
 				pid, 
 				mpeg_packets_received,
 				pcr,
-				pcr/ 27000000.0);
+				pcr/ 27000000.0); */
 		}
+	}
+
+	if (pid == 0)
+	{
+		process_pat_packet(packet);
 	}
 }
 
