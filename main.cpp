@@ -31,9 +31,9 @@ map<uint16_t,uint32_t> pid_histogram;
 
 void print_pid_histogram()
 {
-	for(const auto& kvp : pid_histogram)
+	for(auto kvp = pid_histogram.begin(); kvp != pid_histogram.end(); kvp++)
 	{
-		printf("%d:%d ", kvp.first, kvp.second);
+		printf("%d:%d ", kvp->first, kvp->second);
 	}
 }
 
