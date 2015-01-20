@@ -28,7 +28,31 @@ int sd;
 uint8_t buffer[2048];
 uint32_t mpeg_packets_received = 0;
 
+typedef uint8_t stream_type_t;
+
+class mpeg_program
+{
+public:
+	
+	mpeg_program() : program_number(0xFFFF), pmt_pid(0xFFFF)
+	{
+	}
+
+	mpeg_program(uint16_t prog_num, uint16_t pmt) : 
+		program_number(prog_num),
+		pmt_pid(pmt)
+	{ 
+	}
+
+	// members
+	uint16_t program_number;
+	uint16_t pmt_pid;
+	std::map<uint16_t, stream_type_t> program_pids;
+};
+
 map<uint16_t,uint32_t> pid_histogram;
+map<uint16_t, mpeg_program> pmt_pids_and_programs;
+
 
 void print_pid_histogram()
 {
@@ -38,18 +62,25 @@ void print_pid_histogram()
 	}
 }
 
+
+void process_pmt_packet(uint8_t* packet)
+{
+	printf("About to process PMT packet [pid  = 0x%04X]\n",ts_get_pid(packet));
+}
+
 void process_pat_packet(uint8_t* packet)
 {
 
 	unsigned int program_index = 0;
 	uint8_t* p_pat_payload = ts_section(packet);
-	printf("Got PID Packet...\n");
+	printf("Got PAT Packet...\n");
 	while(true)
 	{
 		uint8_t* p_pat_n = pat_get_program(p_pat_payload,program_index);
 		if (p_pat_n == 0) break;
 		unsigned int program_number = patn_get_program(p_pat_n);
 		unsigned int pid = patn_get_pid(p_pat_n);
+		pmt_pids_and_programs[pid] = mpeg_program(program_number,pid);
 		printf("\t Program %d at pid 0x%04X.\n",program_number, pid);
 		program_index++;
 	}
@@ -78,6 +109,11 @@ void process_mpeg_packet(uint8_t* packet)
 	if (pid == 0)
 	{
 		process_pat_packet(packet);
+	}
+
+	if (pmt_pids_and_programs.find(pid) != pmt_pids_and_programs.end())
+	{
+		process_pmt_packet(packet);
 	}
 }
 
