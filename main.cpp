@@ -56,16 +56,43 @@ map<uint16_t, mpeg_program> pmt_pids_and_programs;
 
 void print_pid_histogram()
 {
+	printf("PID histogram:\n\t");
 	for(auto kvp = pid_histogram.begin(); kvp != pid_histogram.end(); kvp++)
 	{
-		printf("%d:%d ", kvp->first, kvp->second);
+		printf("0x%04X:%d ", kvp->first, kvp->second);
 	}
+	printf("\n");
 }
 
 
 void process_pmt_packet(uint8_t* packet)
 {
 	printf("About to process PMT packet [pid  = 0x%04X]\n",ts_get_pid(packet));
+
+	uint8_t* p_pmt_payload = ts_section(packet);
+
+	uint16_t this_pid = ts_get_pid(packet);
+	uint16_t prog_num = pmt_get_program_number(p_pmt_payload);
+	uint16_t pcrpid = pmt_get_pcrpid(p_pmt_payload);
+	
+	printf( "PMT Found [PID: 0x%04X][Program: %d][PCR PID: 0x%04X]\n",
+		this_pid, prog_num, pcrpid);
+
+	if (this_pid == 0x190)
+	{
+		unsigned int offset = 0;
+		while (offset < 188)
+		{
+			printf("0x%03X: ",offset);
+			for (unsigned int i = 0; i < 16; ++i)
+			{
+				if (offset >= 188) break;
+				printf("%02X ",packet[offset]);
+				offset++;
+			}
+			printf("\n");
+		}
+	}
 }
 
 void process_pat_packet(uint8_t* packet)
@@ -233,13 +260,16 @@ int main(int argc, char** argv)
 
 	open_network_connection(argv[1], argv[2], argv[3]);
 
-	while(1)
+	unsigned int packets_processed = 0;
+
+	while(packets_processed < 1000)
 	{
 		read_ip_packets();
+		packets_processed++;
 	}	
-	
 
 	close(sd);
 	printf("Socket has been closed.\n");
 
+	print_pid_histogram();
 }
