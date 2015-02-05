@@ -1,0 +1,4 @@
+- Pull git@github.com:kgmoore/bitstream.git && sudo make install
+-- Need to install git://git.videolan.org/bitstream.git
+-- Need to add an exxplicit cast to a malloc return
+

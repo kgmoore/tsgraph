@@ -12,6 +12,7 @@
 using namespace std;
 
 #include <bitstream/mpeg/ts.h>
+#include <bitstream/mpeg/psi.h>
 
 #define MPEG_PACKET_SENTINAL 0x47
 #define MPEG_PACKET_SIZE 188
@@ -20,20 +21,96 @@ using namespace std;
 
 void print_usage()
 {
-	printf("USAGE: tsgraph dest_ip dest_port interface_ip\n");
+	printf("USAGE: tsgraph FILE filename\n");
+	printf("   or  tsgraph NETWORK dest_ip dest_port interface_ip\n");
 }
 
 int sd;
 uint8_t buffer[2048];
 uint32_t mpeg_packets_received = 0;
 
+typedef uint8_t stream_type_t;
+
+class mpeg_program
+{
+public:
+	
+	mpeg_program() : program_number(0xFFFF), pmt_pid(0xFFFF)
+	{
+	}
+
+	mpeg_program(uint16_t prog_num, uint16_t pmt) : 
+		program_number(prog_num),
+		pmt_pid(pmt)
+	{ 
+	}
+
+	// members
+	uint16_t program_number;
+	uint16_t pmt_pid;
+	std::map<uint16_t, stream_type_t> program_pids;
+};
+
 map<uint16_t,uint32_t> pid_histogram;
+map<uint16_t, mpeg_program> pmt_pids_and_programs;
+
 
 void print_pid_histogram()
 {
-	for(const auto& kvp : pid_histogram)
+	printf("PID histogram:\n\t");
+	for(auto kvp = pid_histogram.begin(); kvp != pid_histogram.end(); kvp++)
 	{
-		printf("%d:%d ", kvp.first, kvp.second);
+		printf("0x%04X:%d ", kvp->first, kvp->second);
+	}
+	printf("\n");
+}
+
+
+void process_pmt_packet(uint8_t* packet)
+{
+	//printf("About to process PMT packet [pid  = 0x%04X]\n",ts_get_pid(packet));
+
+	uint8_t* p_pmt_payload = ts_section(packet);
+
+	uint16_t this_pid = ts_get_pid(packet);
+	uint16_t prog_num = pmt_get_program_number(p_pmt_payload);
+	uint16_t pcrpid = pmt_get_pcrpid(p_pmt_payload);
+	
+	//printf( "PMT Found [PID: 0x%04X][Program: %d][PCR PID: 0x%04X]\n",
+	//	this_pid, prog_num, pcrpid);
+
+	if (this_pid == 0x190)
+	{
+		unsigned int offset = 0;
+		while (offset < 188)
+		{
+			printf("0x%03X: ",offset);
+			for (unsigned int i = 0; i < 16; ++i)
+			{
+				if (offset >= 188) break;
+				printf("%02X ",packet[offset]);
+				offset++;
+			}
+			printf("\n");
+		}
+	}
+}
+
+void process_pat_packet(uint8_t* packet)
+{
+
+	unsigned int program_index = 0;
+	uint8_t* p_pat_payload = ts_section(packet);
+	//printf("Got PAT Packet...\n");
+	while(true)
+	{
+		uint8_t* p_pat_n = pat_get_program(p_pat_payload,program_index);
+		if (p_pat_n == 0) break;
+		unsigned int program_number = patn_get_program(p_pat_n);
+		unsigned int pid = patn_get_pid(p_pat_n);
+		pmt_pids_and_programs[pid] = mpeg_program(program_number,pid);
+		//printf("\t Program %d at pid 0x%04X.\n",program_number, pid);
+		program_index++;
 	}
 }
 
@@ -49,12 +126,22 @@ void process_mpeg_packet(uint8_t* packet)
 		if (tsaf_has_pcr(packet))
 		{
 			uint64_t pcr = tsaf_get_pcr(packet);
-			printf("PID:%u, packet:%u, pcr:%lu (%f sec)\n", 
+			/* printf("PID:%u, packet:%u, pcr:%lu (%f sec)\n", 
 				pid, 
 				mpeg_packets_received,
 				pcr,
-				pcr/ 27000000.0);
+				pcr/ 27000000.0); */
 		}
+	}
+
+	if (pid == 0)
+	{
+		process_pat_packet(packet);
+	}
+
+	if (pmt_pids_and_programs.find(pid) != pmt_pids_and_programs.end())
+	{
+		process_pmt_packet(packet);
 	}
 }
 
@@ -182,7 +269,7 @@ int main(int argc, char** argv)
 		exit(1);
 	}
 	
-	if (strcmp(argv[1], "file") == 0)
+	if (strcmp(argv[1], "FILE") == 0)
 	{
 		if (argc =! 3)
 		{
@@ -200,8 +287,8 @@ int main(int argc, char** argv)
 		process_file_packets(pFile);
 
 	}
-	else if (strcmp(argv[1], "network"))
-	{
+	else if (strcmp(argv[1], "NETWORK"))
+	{	
 		if (argc =! 5)
 		{
 			print_usage();
@@ -209,13 +296,24 @@ int main(int argc, char** argv)
 		}
 
 		open_network_connection(argv[2], argv[3], argv[4]);
+		
+		unsigned int packets_processed = 0;
 
-		while(1)
+		while(packets_processed < 1000)
 		{
 			read_ip_packets();
+			packets_processed++;
 		}	
+
 		
 		close(sd);
 		printf("Socket has been closed.\n");
 	}
+	else
+	{
+		print_usage();
+		exit(1);
+	}	
+
+	print_pid_histogram();
 }
