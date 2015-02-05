@@ -65,6 +65,23 @@ void print_pid_histogram()
 	printf("\n");
 }
 
+void print_bytes(uint8_t* bytes, uint32_t count)
+{
+	uint32_t byte = 0;
+	while (byte < count)
+	{
+		if (byte % 16 == 0) printf("%03u: ", byte);
+		printf("%02X ", bytes[byte]);
+		byte++;
+		if (byte % 16 == 0) printf("\n");
+	}
+	printf("\n");
+}
+
+void print_packet(uint8_t* packet)
+{
+	print_bytes(packet, MPEG_PACKET_SIZE);
+}
 
 void process_pmt_packet(uint8_t* packet)
 {
@@ -114,6 +131,40 @@ void process_pat_packet(uint8_t* packet)
 	}
 }
 
+float pcr_to_seconds(uint64_t pcr)
+{
+	/*float ticks_90khz = static_cast<float>(pcr >>  9);
+	float ticks_27mhz = static_cast<float>(pcr & 0x1FF);
+	return ticks_90khz / 90e3f + ticks_27mhz / 27e6f;*/
+	return pcr / 90000.0;
+
+}
+
+uint64_t extract_uint64(const uint8_t* bytes, uint32_t count)
+{
+	uint64_t ret = 0;
+
+	for(int i = 0; i < count; ++i)
+	{
+		ret = ret << 8;
+		ret += bytes[i];
+	}
+
+	return ret;
+}
+
+float extract_ntp_timestamp(const uint8_t* bytes)
+{
+	uint64_t seconds = extract_uint64(bytes + 0, 4);
+	uint64_t fraction = extract_uint64(bytes + 4, 4);
+
+	float fraction_float = static_cast<float>(fraction);
+	fraction_float /= 0x100000000;
+	fraction_float /= 0x100000000;
+
+	return static_cast<float>(seconds) + fraction_float;
+}
+
 void process_mpeg_packet(uint8_t* packet)
 {
 	mpeg_packets_received++;
@@ -123,15 +174,55 @@ void process_mpeg_packet(uint8_t* packet)
 
 	if (ts_has_adaptation(packet))
 	{
+		uint64_t pcr = 0;
+
 		if (tsaf_has_pcr(packet))
 		{
-			uint64_t pcr = tsaf_get_pcr(packet);
-			/* printf("PID:%u, packet:%u, pcr:%lu (%f sec)\n", 
-				pid, 
-				mpeg_packets_received,
-				pcr,
-				pcr/ 27000000.0); */
+			pcr = tsaf_get_pcr(packet);
 		}
+		
+		if (tsaf_get_transport_private_data_flag(packet))
+		{
+			uint8_t adaptation_length = packet[4];
+
+			printf("PID:%u, pcr:%lu (%f sec), AF:\n", 
+					pid, 
+					pcr,
+					pcr_to_seconds(pcr));
+
+			print_bytes(packet + 4, adaptation_length + 1);
+			uint64_t seconds = 0;
+
+			if (packet[4+9] == 0xDF)
+			{
+				// Cable Labs
+				seconds = extract_uint64(packet + 4 + 16, 4);
+				printf("CableLabs EBP: %lu seconds\n",seconds);
+			}
+			if (packet[4+9] == 0xA9)
+			{
+				seconds = extract_uint64(packet + 4 + 12, 4);
+				printf("Legacy EBP: %lu seconds\n",seconds);
+			}
+		}
+/*
+		//if ( (packet[13] == 0xDF) && (packet[14] == 0x0D))
+		if ( (packet[13] == 0xDF) )
+		{
+			//000: 47 41 E1 30 17 72 00 2B 58 11 FE 7C 0F DF 0D 45
+			//016: 42 50 30 C8 D8 7D 31 3F 3A D6 00 00 00 00 01 E0
+			printf("PID:[%u] AF_private:[%02X %02X %02X %02X %02X %02X]\n", pid, 
+				*(packet + 13), 
+					*(packet + 14), 
+					*(packet + 15), 
+				*(packet + 16), 
+				*(packet + 17), 
+				*(packet + 18)); 
+		
+			print_packet(packet);
+
+		}
+*/		
 	}
 
 	if (pid == 0)
