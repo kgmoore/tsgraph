@@ -157,6 +157,16 @@ void open_network_connection(char* dest_ip, char* dest_port, char* interface_ip)
 
 }
 
+void process_file_packets(FILE* pFile)
+{
+	uint8_t packet_buffer[MPEG_PACKET_SIZE];
+	while (!feof(pFile))
+	{
+		fread(packet_buffer,188,1,pFile);
+		process_mpeg_packet(packet_buffer);
+	}
+}
+
 int main(int argc, char** argv)
 {
 	printf("TS Graph Tool - Kevin Moore - Built %s\n", __DATE__);
@@ -166,21 +176,46 @@ int main(int argc, char** argv)
 		printf("Arg %i is %s\n",i,argv[i]);
 	}
 
-	if (argc < 4)
+	if (argc < 3)
 	{
 		print_usage();
 		exit(1);
 	}
-
-	open_network_connection(argv[1], argv[2], argv[3]);
-
-	while(1)
-	{
-		read_ip_packets();
-	}	
 	
+	if (strcmp(argv[1], "file") == 0)
+	{
+		if (argc =! 3)
+		{
+			print_usage();
+			exit(1);
+		}
 
-	close(sd);
-	printf("Socket has been closed.\n");
+		FILE* pFile = fopen(argv[2],"rb");
 
+		if (pFile == 0)
+		{
+			printf("File %s cannot be opened.\n",argv[2]);
+		}
+
+		process_file_packets(pFile);
+
+	}
+	else if (strcmp(argv[1], "network"))
+	{
+		if (argc =! 5)
+		{
+			print_usage();
+			exit(1);
+		}
+
+		open_network_connection(argv[2], argv[3], argv[4]);
+
+		while(1)
+		{
+			read_ip_packets();
+		}	
+		
+		close(sd);
+		printf("Socket has been closed.\n");
+	}
 }
