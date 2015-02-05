@@ -65,6 +65,18 @@ void print_pid_histogram()
 	printf("\n");
 }
 
+void print_packet(uint8_t* packet)
+{
+	uint32_t byte = 0;
+	while (byte < MPEG_PACKET_SIZE)
+	{
+		if (byte % 16 == 0) printf("%03u: ", byte);
+		printf("%02X ", packet[byte]);
+		byte++;
+		if (byte % 16 == 0) printf("\n");
+	}
+	printf("\n");
+}
 
 void process_pmt_packet(uint8_t* packet)
 {
@@ -132,6 +144,22 @@ void process_mpeg_packet(uint8_t* packet)
 				pcr,
 				pcr/ 27000000.0); */
 		}
+		uint8_t adaptation_length = packet[4];
+
+		//if ( (packet[13] == 0xDF) && (packet[14] == 0x0D))
+		if ( (packet[13] == 0xDF) )
+		{
+			//000: 47 41 E1 30 17 72 00 2B 58 11 FE 7C 0F DF 0D 45
+			//016: 42 50 30 C8 D8 7D 31 3F 3A D6 00 00 00 00 01 E0
+			printf("PID:[%u] AF_private:[%02X %02X %02X %02X %02X %02X]\n", pid, 
+				*(packet + 13), 
+					*(packet + 14), 
+					*(packet + 15), 
+				*(packet + 16), 
+				*(packet + 17), 
+				*(packet + 18)); 
+		}
+		//print_packet(packet);
 	}
 
 	if (pid == 0)
