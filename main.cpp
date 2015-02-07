@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
 
 #include <map>
 
@@ -169,9 +170,16 @@ float extract_ntp_timestamp(const uint8_t* bytes)
 }
 
 
-void process_mpeg_packet(uint8_t* packet)
+void process_mpeg_packet(uint8_t* packet, uint64_t packet_time)
 {
 	mpeg_packets_received++;
+	
+	if (mpeg_packets_received % 100 == 0)
+	{
+		//printf("At timestamp %lu, %u packets have been received.\n", packet_time, mpeg_packets_received);
+	}
+
+
 	uint16_t pid = ts_get_pid(packet);
 
 	pid_histogram[pid]++;
@@ -247,7 +255,7 @@ uint64_t get_timestamp()
 	uint64_t ret;
 
 	timespec ts;
-	clock_gettime(CLOCK_MONOTONIC, &ts); // Works on Linux
+	clock_gettime(CLOCK_MONOTONIC, &ts);
 
 	ret = ts.tv_sec;
 	ret *= NANOSEC_PER_SEC;
@@ -256,10 +264,30 @@ uint64_t get_timestamp()
 	return ret;
 }
 
+void print_timer_resolution()
+{
+	uint64_t nanoseconds;
+
+	timespec ts;
+	clock_getres(CLOCK_MONOTONIC, &ts);
+
+	nanoseconds = ts.tv_sec;
+	nanoseconds *= NANOSEC_PER_SEC;
+	nanoseconds += ts.tv_nsec;
+
+	printf("On this system CLOCK_MONOTONIC reports a resolution of %lu nanoseconds.\n", nanoseconds);
+}
+
+
+
+
 void read_ip_packets()
 {
 	ssize_t recv_size;
 	static unsigned int packets = 0;
+	
+	static bool last_recv_time_valid = 0;
+	static uint64_t last_recv_time;
 
 	recv_size = recv(sd,buffer,sizeof(buffer), 0);
 	
@@ -269,38 +297,61 @@ void read_ip_packets()
 		return;
 	}
 
-	uint64_t packet_time = get_timestamp();
+	uint64_t recv_time = get_timestamp();
 
-	printf("Packet Time: %lu\n",packet_time);
-
-	unsigned int offset = 0;
-
-	// check for an RTP header. skip if found
-	if (buffer[offset] == RTP_HEADER_SENTINAL)
+	// we need historical packet timing, so we bail early on the first packet reception
+	if (last_recv_time_valid == false)
 	{
-		offset += RTP_HEADER_SIZE;
+		last_recv_time = recv_time;
+		last_recv_time_valid = true;
+		return;
 	}
 
-	while (offset < recv_size)
+	unsigned int rtp_header_bytes = 0;
+
+	// check for an RTP header. skip if found
+	if (buffer[0] == RTP_HEADER_SENTINAL)
 	{
+		rtp_header_bytes = RTP_HEADER_SIZE;
+	}
+
+	unsigned int mpeg_packets = (recv_size - rtp_header_bytes) / MPEG_PACKET_SIZE;
+
+	if ((mpeg_packets * MPEG_PACKET_SIZE + rtp_header_bytes) != recv_size)
+	{
+		printf(
+			"There are leftover bytes in this packet. [recv_size:%u] [mpeg_packets:%u] [rtp_header_size:%u]\n",
+			recv_size, mpeg_packets, rtp_header_bytes);
+	}
+
+	printf("   Last recv_time = %lu\n", last_recv_time);	
+
+	for (unsigned int packet = 0; packet < mpeg_packets; ++ packet)
+	{
+		// this code makes the assumption that individual MPEG packets arrived spread out in time, 
+		// even though they actually arrived all at once. This should take some bias out of the PCR accuracy calculations.
+
+		// packet 1 gets 1/7ths of the time difference, packet 2 gets 2/7ths, ... , packet 7 gets the current time
+		uint64_t packet_time = last_recv_time + (recv_time - last_recv_time) * (packet + 1) / mpeg_packets;
+		
+		// get the byte position for this packet
+		unsigned int offset = rtp_header_bytes + (packet * MPEG_PACKET_SIZE);
+	
+		// now do the packet processing
 		if (buffer[offset] == MPEG_PACKET_SENTINAL)
 		{
-			process_mpeg_packet(buffer + offset);
+			printf("    packet %u time = %lu\n", packet, packet_time);	
+			process_mpeg_packet(buffer + offset, packet_time);
 		}
 		else
 		{
 			printf("Expected 0x%02X marker, got 0x%02X\n", MPEG_PACKET_SENTINAL, buffer[offset] );
 		}
-		offset += MPEG_PACKET_SIZE;
 	}
 
-	packets++;
-	if ((packets % 100) == 0) 
-	{
-//		printf("%i ip packets received, %i mpeg packets received. ",packets, mpeg_packets_received);
-//		print_pid_histogram();
-//		printf("\n");
-	}
+	printf("Current recv_time = %lu\n", recv_time);
+	printf("********************\n");
+	last_recv_time = recv_time;
 }
 
 void open_network_connection(char* dest_ip, char* dest_port, char* interface_ip)
@@ -365,7 +416,7 @@ void process_file_packets(FILE* pFile)
 	while (!feof(pFile))
 	{
 		fread(packet_buffer,188,1,pFile);
-		process_mpeg_packet(packet_buffer);
+		process_mpeg_packet(packet_buffer,0);
 	}
 }
 
@@ -377,6 +428,8 @@ int main(int argc, char** argv)
 	{
 		printf("Arg %i is %s\n",i,argv[i]);
 	}
+
+	print_timer_resolution();
 
 	if (argc < 3)
 	{
@@ -402,7 +455,7 @@ int main(int argc, char** argv)
 		process_file_packets(pFile);
 
 	}
-	else if (strcmp(argv[1], "NETWORK"))
+	else if (strcmp(argv[1], "NETWORK") == 0)
 	{	
 		if (argc =! 5)
 		{
@@ -414,7 +467,7 @@ int main(int argc, char** argv)
 		
 		unsigned int packets_processed = 0;
 
-		while(packets_processed < 1000)
+		while(packets_processed < 10000)
 		{
 			read_ip_packets();
 			packets_processed++;
