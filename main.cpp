@@ -174,15 +174,18 @@ void process_mpeg_packet(uint8_t* packet)
 
 	if (ts_has_adaptation(packet))
 	{
-		uint64_t pcr = 0;
-
-		if (tsaf_has_pcr(packet))
-		{
-			pcr = tsaf_get_pcr(packet);
-		}
-		
+		unsigned int adaptation_start = 4;
 		if (tsaf_get_transport_private_data_flag(packet))
 		{
+			unsigned int private_data_offset = 3;
+			uint64_t pcr = 0;
+
+			if (tsaf_has_pcr(packet))
+			{
+				private_data_offset += 6;
+				pcr = tsaf_get_pcr(packet);
+			}
+
 			uint8_t adaptation_length = packet[4];
 
 			printf("PID:%u, pcr:%lu (%f sec), AF:\n", 
@@ -193,13 +196,13 @@ void process_mpeg_packet(uint8_t* packet)
 			print_bytes(packet + 4, adaptation_length + 1);
 			uint64_t seconds = 0;
 
-			if (packet[4+9] == 0xDF)
+			if (packet[adaptation_start + private_data_offset] == 0xDF)
 			{
 				// Cable Labs
 				seconds = extract_uint64(packet + 4 + 16, 4);
 				printf("CableLabs EBP: %lu seconds\n",seconds);
 			}
-			if (packet[4+9] == 0xA9)
+			if (packet[adaptation_start + private_data_offset] == 0xA9)
 			{
 				seconds = extract_uint64(packet + 4 + 12, 4);
 				printf("Legacy EBP: %lu seconds\n",seconds);
