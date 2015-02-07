@@ -1,4 +1,5 @@
 #include <sys/types.h>
+#include <sys/time.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -18,6 +19,8 @@ using namespace std;
 #define MPEG_PACKET_SIZE 188
 #define RTP_HEADER_SENTINAL 0x80
 #define RTP_HEADER_SIZE 12
+
+#define NANOSEC_PER_SEC 1000000000
 
 void print_usage()
 {
@@ -165,6 +168,7 @@ float extract_ntp_timestamp(const uint8_t* bytes)
 	return static_cast<float>(seconds) + fraction_float;
 }
 
+
 void process_mpeg_packet(uint8_t* packet)
 {
 	mpeg_packets_received++;
@@ -236,6 +240,22 @@ void process_mpeg_packet(uint8_t* packet)
 	}
 }
 
+
+
+uint64_t get_timestamp()
+{
+	uint64_t ret;
+
+	timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts); // Works on Linux
+
+	ret = ts.tv_sec;
+	ret *= NANOSEC_PER_SEC;
+	ret += ts.tv_nsec;
+
+	return ret;
+}
+
 void read_ip_packets()
 {
 	ssize_t recv_size;
@@ -248,6 +268,10 @@ void read_ip_packets()
 		printf("recv returned Zero!\n");
 		return;
 	}
+
+	uint64_t packet_time = get_timestamp();
+
+	printf("Packet Time: %lu\n",packet_time);
 
 	unsigned int offset = 0;
 
