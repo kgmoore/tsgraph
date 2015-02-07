@@ -174,9 +174,9 @@ void process_mpeg_packet(uint8_t* packet, uint64_t packet_time)
 {
 	mpeg_packets_received++;
 	
-	if (mpeg_packets_received % 100 == 0)
+	if (mpeg_packets_received % 1000 == 0)
 	{
-		//printf("At timestamp %lu, %u packets have been received.\n", packet_time, mpeg_packets_received);
+		printf("At timestamp %lu, %u packets have been received.\n", packet_time, mpeg_packets_received);
 	}
 
 
@@ -324,8 +324,6 @@ void read_ip_packets()
 			recv_size, mpeg_packets, rtp_header_bytes);
 	}
 
-	printf("   Last recv_time = %lu\n", last_recv_time);	
-
 	for (unsigned int packet = 0; packet < mpeg_packets; ++ packet)
 	{
 		// this code makes the assumption that individual MPEG packets arrived spread out in time, 
@@ -340,7 +338,6 @@ void read_ip_packets()
 		// now do the packet processing
 		if (buffer[offset] == MPEG_PACKET_SENTINAL)
 		{
-			printf("    packet %u time = %lu\n", packet, packet_time);	
 			process_mpeg_packet(buffer + offset, packet_time);
 		}
 		else
@@ -349,8 +346,6 @@ void read_ip_packets()
 		}
 	}
 
-	printf("Current recv_time = %lu\n", recv_time);
-	printf("********************\n");
 	last_recv_time = recv_time;
 }
 
