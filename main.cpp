@@ -10,6 +10,8 @@
 #include <time.h>
 
 #include <map>
+#include <vector>
+#include <utility>
 
 using namespace std;
 
@@ -57,7 +59,7 @@ public:
 
 map<uint16_t,uint32_t> pid_histogram;
 map<uint16_t, mpeg_program> pmt_pids_and_programs;
-
+vector<pair<uint64_t,uint64_t>> pcrs_and_packet_times;
 
 void print_pid_histogram()
 {
@@ -67,6 +69,21 @@ void print_pid_histogram()
 		printf("0x%04X:%d ", kvp->first, kvp->second);
 	}
 	printf("\n");
+}
+
+
+void write_pcrs_and_packet_times()
+{
+	FILE* output = fopen("pcrs_packet_times.txt","w");
+
+	for( 	vector<pair<uint64_t,uint64_t>>::iterator iter = pcrs_and_packet_times.begin();
+		iter != pcrs_and_packet_times.end(); 
+		iter++)
+	{
+		fprintf(output, "%lu\t%lu\n",iter->first, iter->second);
+	}
+
+	fclose(output);
 }
 
 void print_bytes(uint8_t* bytes, uint32_t count)
@@ -174,12 +191,6 @@ void process_mpeg_packet(uint8_t* packet, uint64_t packet_time)
 {
 	mpeg_packets_received++;
 	
-	if (mpeg_packets_received % 1000 == 0)
-	{
-		printf("At timestamp %lu, %u packets have been received.\n", packet_time, mpeg_packets_received);
-	}
-
-
 	uint16_t pid = ts_get_pid(packet);
 
 	pid_histogram[pid]++;
@@ -191,7 +202,8 @@ void process_mpeg_packet(uint8_t* packet, uint64_t packet_time)
 		if (tsaf_has_pcr(packet))
 		{
 			pcr = tsaf_get_pcr(packet);
-		}
+			pcrs_and_packet_times.push_back(make_pair(pcr,packet_time));		
+		}	
 		
 		if (tsaf_get_transport_private_data_flag(packet))
 		{
@@ -217,24 +229,6 @@ void process_mpeg_packet(uint8_t* packet, uint64_t packet_time)
 				printf("Legacy EBP: %lu seconds\n",seconds);
 			}
 		}
-/*
-		//if ( (packet[13] == 0xDF) && (packet[14] == 0x0D))
-		if ( (packet[13] == 0xDF) )
-		{
-			//000: 47 41 E1 30 17 72 00 2B 58 11 FE 7C 0F DF 0D 45
-			//016: 42 50 30 C8 D8 7D 31 3F 3A D6 00 00 00 00 01 E0
-			printf("PID:[%u] AF_private:[%02X %02X %02X %02X %02X %02X]\n", pid, 
-				*(packet + 13), 
-					*(packet + 14), 
-					*(packet + 15), 
-				*(packet + 16), 
-				*(packet + 17), 
-				*(packet + 18)); 
-		
-			print_packet(packet);
-
-		}
-*/		
 	}
 
 	if (pid == 0)
@@ -479,4 +473,5 @@ int main(int argc, char** argv)
 	}	
 
 	print_pid_histogram();
+	write_pcrs_and_packet_times();
 }
