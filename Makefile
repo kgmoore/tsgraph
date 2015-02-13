@@ -1,7 +1,7 @@
 all: tsgraph
 
 tsgraph: main.o
-	g++ -g main.o -o tsgraph
+	g++ -lrt -g main.o -o tsgraph
 
 main.o: main.cpp
 	g++ -c -g -std=c++0x main.cpp

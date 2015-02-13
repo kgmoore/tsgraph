@@ -1,4 +1,5 @@
 #include <sys/types.h>
+#include <sys/time.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -6,8 +7,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
 
 #include <map>
+#include <vector>
+#include <utility>
 
 using namespace std;
 
@@ -18,6 +22,8 @@ using namespace std;
 #define MPEG_PACKET_SIZE 188
 #define RTP_HEADER_SENTINAL 0x80
 #define RTP_HEADER_SIZE 12
+
+#define NANOSEC_PER_SEC 1000000000
 
 void print_usage()
 {
@@ -53,7 +59,7 @@ public:
 
 map<uint16_t,uint32_t> pid_histogram;
 map<uint16_t, mpeg_program> pmt_pids_and_programs;
-
+vector<pair<uint64_t,uint64_t>> pcrs_and_packet_times;
 
 void print_pid_histogram()
 {
@@ -65,6 +71,38 @@ void print_pid_histogram()
 	printf("\n");
 }
 
+
+void write_pcrs_and_packet_times()
+{
+	FILE* output = fopen("pcrs_packet_times.txt","w");
+
+	for( 	vector<pair<uint64_t,uint64_t>>::iterator iter = pcrs_and_packet_times.begin();
+		iter != pcrs_and_packet_times.end(); 
+		iter++)
+	{
+		fprintf(output, "%lu\t%lu\n",iter->first, iter->second);
+	}
+
+	fclose(output);
+}
+
+void print_bytes(uint8_t* bytes, uint32_t count)
+{
+	uint32_t byte = 0;
+	while (byte < count)
+	{
+		if (byte % 16 == 0) printf("%03u: ", byte);
+		printf("%02X ", bytes[byte]);
+		byte++;
+		if (byte % 16 == 0) printf("\n");
+	}
+	printf("\n");
+}
+
+void print_packet(uint8_t* packet)
+{
+	print_bytes(packet, MPEG_PACKET_SIZE);
+}
 
 void process_pmt_packet(uint8_t* packet)
 {
@@ -114,23 +152,82 @@ void process_pat_packet(uint8_t* packet)
 	}
 }
 
-void process_mpeg_packet(uint8_t* packet)
+float pcr_to_seconds(uint64_t pcr)
+{
+	/*float ticks_90khz = static_cast<float>(pcr >>  9);
+	float ticks_27mhz = static_cast<float>(pcr & 0x1FF);
+	return ticks_90khz / 90e3f + ticks_27mhz / 27e6f;*/
+	return pcr / 90000.0;
+
+}
+
+uint64_t extract_uint64(const uint8_t* bytes, uint32_t count)
+{
+	uint64_t ret = 0;
+
+	for(int i = 0; i < count; ++i)
+	{
+		ret = ret << 8;
+		ret += bytes[i];
+	}
+
+	return ret;
+}
+
+float extract_ntp_timestamp(const uint8_t* bytes)
+{
+	uint64_t seconds = extract_uint64(bytes + 0, 4);
+	uint64_t fraction = extract_uint64(bytes + 4, 4);
+
+	float fraction_float = static_cast<float>(fraction);
+	fraction_float /= 0x100000000;
+	fraction_float /= 0x100000000;
+
+	return static_cast<float>(seconds) + fraction_float;
+}
+
+
+void process_mpeg_packet(uint8_t* packet, uint64_t packet_time)
 {
 	mpeg_packets_received++;
+	
 	uint16_t pid = ts_get_pid(packet);
 
 	pid_histogram[pid]++;
 
 	if (ts_has_adaptation(packet))
 	{
+		uint64_t pcr = 0;
+
 		if (tsaf_has_pcr(packet))
 		{
-			uint64_t pcr = tsaf_get_pcr(packet);
-			/* printf("PID:%u, packet:%u, pcr:%lu (%f sec)\n", 
-				pid, 
-				mpeg_packets_received,
-				pcr,
-				pcr/ 27000000.0); */
+			pcr = tsaf_get_pcr(packet);
+			pcrs_and_packet_times.push_back(make_pair(pcr,packet_time));		
+		}	
+		
+		if (tsaf_get_transport_private_data_flag(packet))
+		{
+			uint8_t adaptation_length = packet[4];
+
+			printf("PID:%u, pcr:%lu (%f sec), AF:\n", 
+					pid, 
+					pcr,
+					pcr_to_seconds(pcr));
+
+			print_bytes(packet + 4, adaptation_length + 1);
+			uint64_t seconds = 0;
+
+			if (packet[4+9] == 0xDF)
+			{
+				// Cable Labs
+				seconds = extract_uint64(packet + 4 + 16, 4);
+				printf("CableLabs EBP: %lu seconds\n",seconds);
+			}
+			if (packet[4+9] == 0xA9)
+			{
+				seconds = extract_uint64(packet + 4 + 12, 4);
+				printf("Legacy EBP: %lu seconds\n",seconds);
+			}
 		}
 	}
 
@@ -145,10 +242,46 @@ void process_mpeg_packet(uint8_t* packet)
 	}
 }
 
+
+
+uint64_t get_timestamp()
+{
+	uint64_t ret;
+
+	timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+
+	ret = ts.tv_sec;
+	ret *= NANOSEC_PER_SEC;
+	ret += ts.tv_nsec;
+
+	return ret;
+}
+
+void print_timer_resolution()
+{
+	uint64_t nanoseconds;
+
+	timespec ts;
+	clock_getres(CLOCK_MONOTONIC, &ts);
+
+	nanoseconds = ts.tv_sec;
+	nanoseconds *= NANOSEC_PER_SEC;
+	nanoseconds += ts.tv_nsec;
+
+	printf("On this system CLOCK_MONOTONIC reports a resolution of %lu nanoseconds.\n", nanoseconds);
+}
+
+
+
+
 void read_ip_packets()
 {
 	ssize_t recv_size;
 	static unsigned int packets = 0;
+	
+	static bool last_recv_time_valid = 0;
+	static uint64_t last_recv_time;
 
 	recv_size = recv(sd,buffer,sizeof(buffer), 0);
 	
@@ -158,34 +291,56 @@ void read_ip_packets()
 		return;
 	}
 
-	unsigned int offset = 0;
+	uint64_t recv_time = get_timestamp();
 
-	// check for an RTP header. skip if found
-	if (buffer[offset] == RTP_HEADER_SENTINAL)
+	// we need historical packet timing, so we bail early on the first packet reception
+	if (last_recv_time_valid == false)
 	{
-		offset += RTP_HEADER_SIZE;
+		last_recv_time = recv_time;
+		last_recv_time_valid = true;
+		return;
 	}
 
-	while (offset < recv_size)
+	unsigned int rtp_header_bytes = 0;
+
+	// check for an RTP header. skip if found
+	if (buffer[0] == RTP_HEADER_SENTINAL)
 	{
+		rtp_header_bytes = RTP_HEADER_SIZE;
+	}
+
+	unsigned int mpeg_packets = (recv_size - rtp_header_bytes) / MPEG_PACKET_SIZE;
+
+	if ((mpeg_packets * MPEG_PACKET_SIZE + rtp_header_bytes) != recv_size)
+	{
+		printf(
+			"There are leftover bytes in this packet. [recv_size:%u] [mpeg_packets:%u] [rtp_header_size:%u]\n",
+			recv_size, mpeg_packets, rtp_header_bytes);
+	}
+
+	for (unsigned int packet = 0; packet < mpeg_packets; ++ packet)
+	{
+		// this code makes the assumption that individual MPEG packets arrived spread out in time, 
+		// even though they actually arrived all at once. This should take some bias out of the PCR accuracy calculations.
+
+		// packet 1 gets 1/7ths of the time difference, packet 2 gets 2/7ths, ... , packet 7 gets the current time
+		uint64_t packet_time = last_recv_time + (recv_time - last_recv_time) * (packet + 1) / mpeg_packets;
+		
+		// get the byte position for this packet
+		unsigned int offset = rtp_header_bytes + (packet * MPEG_PACKET_SIZE);
+	
+		// now do the packet processing
 		if (buffer[offset] == MPEG_PACKET_SENTINAL)
 		{
-			process_mpeg_packet(buffer + offset);
+			process_mpeg_packet(buffer + offset, packet_time);
 		}
 		else
 		{
 			printf("Expected 0x%02X marker, got 0x%02X\n", MPEG_PACKET_SENTINAL, buffer[offset] );
 		}
-		offset += MPEG_PACKET_SIZE;
 	}
 
-	packets++;
-	if ((packets % 100) == 0) 
-	{
-//		printf("%i ip packets received, %i mpeg packets received. ",packets, mpeg_packets_received);
-//		print_pid_histogram();
-//		printf("\n");
-	}
+	last_recv_time = recv_time;
 }
 
 void open_network_connection(char* dest_ip, char* dest_port, char* interface_ip)
@@ -250,7 +405,7 @@ void process_file_packets(FILE* pFile)
 	while (!feof(pFile))
 	{
 		fread(packet_buffer,188,1,pFile);
-		process_mpeg_packet(packet_buffer);
+		process_mpeg_packet(packet_buffer,0);
 	}
 }
 
@@ -262,6 +417,8 @@ int main(int argc, char** argv)
 	{
 		printf("Arg %i is %s\n",i,argv[i]);
 	}
+
+	print_timer_resolution();
 
 	if (argc < 3)
 	{
@@ -287,7 +444,7 @@ int main(int argc, char** argv)
 		process_file_packets(pFile);
 
 	}
-	else if (strcmp(argv[1], "NETWORK"))
+	else if (strcmp(argv[1], "NETWORK") == 0)
 	{	
 		if (argc =! 5)
 		{
@@ -299,10 +456,22 @@ int main(int argc, char** argv)
 		
 		unsigned int packets_processed = 0;
 
-		while(packets_processed < 1000)
+		uint64_t start_time = get_timestamp();
+		uint64_t timespan = NANOSEC_PER_SEC;
+		timespan *= 60;
+		
+		// sets the capture duration in minutes 
+		timespan *= 1; 
+		
+		uint64_t end_time = start_time + timespan;
+
+		while(get_timestamp() < end_time)
 		{
 			read_ip_packets();
 			packets_processed++;
+			if (packets_processed % 10 == 0) 
+				printf("Packets received = %u\n",packets_processed);
+
 		}	
 
 		
@@ -316,4 +485,5 @@ int main(int argc, char** argv)
 	}	
 
 	print_pid_histogram();
+	write_pcrs_and_packet_times();
 }
