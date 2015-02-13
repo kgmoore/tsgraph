@@ -458,14 +458,18 @@ int main(int argc, char** argv)
 
 		uint64_t start_time = get_timestamp();
 		uint64_t timespan = NANOSEC_PER_SEC;
-		timespan *= 60 * 60 * 2;
+		timespan *= 60;
+		
+		// sets the capture duration in minutes 
+		timespan *= 1; 
+		
 		uint64_t end_time = start_time + timespan;
 
 		while(get_timestamp() < end_time)
 		{
 			read_ip_packets();
 			packets_processed++;
-			if (packets_processed % 10000 == 0) 
+			if (packets_processed % 10 == 0) 
 				printf("Packets received = %u\n",packets_processed);
 
 		}	
