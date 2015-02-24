@@ -27,8 +27,8 @@ using namespace std;
 
 void print_usage()
 {
-	printf("USAGE: tsgraph FILE filename\n");
-	printf("   or  tsgraph NETWORK dest_ip dest_port interface_ip\n");
+	printf("USAGE: tsgraph FILE filename pcr_filename\n");
+	printf("   or  tsgraph NETWORK dest_ip dest_port interface_ip pcr_filename\n");
 }
 
 int sd;
@@ -72,19 +72,48 @@ void print_pid_histogram()
 }
 
 
-void write_pcrs_and_packet_times()
+void write_pcrs_and_packet_times(const char* filename)
 {
-	FILE* output = fopen("pcrs_packet_times.txt","w");
+	FILE* output = fopen(filename,"w");
+
+	bool first_line = true;
+	static uint64_t first_pcr = 0, first_timestamp = 0;
+	static uint64_t last_pcr = 0, last_timestamp = 0;
 
 	for( 	vector<pair<uint64_t,uint64_t>>::iterator iter = pcrs_and_packet_times.begin();
 		iter != pcrs_and_packet_times.end(); 
 		iter++)
 	{
-		fprintf(output, "%lu\t%lu\n",iter->first, iter->second);
+		if (first_line)
+		{
+			first_pcr = iter->first;
+			first_timestamp = iter->second;
+			last_pcr = iter->first;
+			last_timestamp = iter->second;
+			first_line = false;
+		}
+			
+		float pcr_difference = (iter->first - last_pcr) / 90000.0;
+		float timestamp_difference = (iter->second - last_timestamp) / 1000000000.0;
+
+		uint64_t relative_pcr = iter->first - first_pcr;
+		uint64_t relative_timestamp = iter->second - first_timestamp;
+
+		last_pcr = iter->first;
+		last_timestamp = iter->second;
+			
+		fprintf(output, 
+			"%lu\t%lu\t%f\t%f\n",
+			relative_pcr, 
+			relative_timestamp,
+			pcr_difference,
+			timestamp_difference);
 	}
 
 	fclose(output);
 }
+
+
 
 void print_bytes(uint8_t* bytes, uint32_t count)
 {
@@ -209,24 +238,24 @@ void process_mpeg_packet(uint8_t* packet, uint64_t packet_time)
 		{
 			uint8_t adaptation_length = packet[4];
 
-			printf("PID:%u, pcr:%lu (%f sec), AF:\n", 
-					pid, 
-					pcr,
-					pcr_to_seconds(pcr));
+			//printf("PID:%u, pcr:%lu (%f sec), AF:\n", 
+			//		pid, 
+			//		pcr,
+			//		pcr_to_seconds(pcr));
 
-			print_bytes(packet + 4, adaptation_length + 1);
+		//	print_bytes(packet + 4, adaptation_length + 1);
 			uint64_t seconds = 0;
 
 			if (packet[4+9] == 0xDF)
 			{
 				// Cable Labs
 				seconds = extract_uint64(packet + 4 + 16, 4);
-				printf("CableLabs EBP: %lu seconds\n",seconds);
+				//printf("CableLabs EBP: %lu seconds\n",seconds);
 			}
 			if (packet[4+9] == 0xA9)
 			{
 				seconds = extract_uint64(packet + 4 + 12, 4);
-				printf("Legacy EBP: %lu seconds\n",seconds);
+				//printf("Legacy EBP: %lu seconds\n",seconds);
 			}
 		}
 	}
@@ -425,10 +454,12 @@ int main(int argc, char** argv)
 		print_usage();
 		exit(1);
 	}
+
+	char* p_pcr_filename = 0;
 	
 	if (strcmp(argv[1], "FILE") == 0)
 	{
-		if (argc =! 3)
+		if (argc != 4)
 		{
 			print_usage();
 			exit(1);
@@ -443,25 +474,28 @@ int main(int argc, char** argv)
 
 		process_file_packets(pFile);
 
+		p_pcr_filename = argv[3];
+
 	}
 	else if (strcmp(argv[1], "NETWORK") == 0)
 	{	
-		if (argc =! 5)
+		if (argc != 6)
 		{
 			print_usage();
 			exit(1);
 		}
 
 		open_network_connection(argv[2], argv[3], argv[4]);
+	
+		p_pcr_filename = argv[5];
 		
 		unsigned int packets_processed = 0;
 
 		uint64_t start_time = get_timestamp();
 		uint64_t timespan = NANOSEC_PER_SEC;
-		timespan *= 60;
 		
-		// sets the capture duration in minutes 
-		timespan *= 1; 
+		// sets the capture duration in seconds 
+		timespan *= 15; 
 		
 		uint64_t end_time = start_time + timespan;
 
@@ -469,7 +503,7 @@ int main(int argc, char** argv)
 		{
 			read_ip_packets();
 			packets_processed++;
-			if (packets_processed % 10 == 0) 
+			if (packets_processed % 100 == 0) 
 				printf("Packets received = %u\n",packets_processed);
 
 		}	
@@ -485,5 +519,5 @@ int main(int argc, char** argv)
 	}	
 
 	print_pid_histogram();
-	write_pcrs_and_packet_times();
+	write_pcrs_and_packet_times(p_pcr_filename);
 }
