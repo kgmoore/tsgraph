@@ -66,7 +66,7 @@ void print_pid_histogram()
 	printf("PID histogram:\n\t");
 	for(auto kvp = pid_histogram.begin(); kvp != pid_histogram.end(); kvp++)
 	{
-		printf("0x%04X:%d ", kvp->first, kvp->second);
+		printf("0x%04X:%06d ", kvp->first, kvp->second);
 	}
 	printf("\n");
 }
@@ -343,7 +343,7 @@ void read_ip_packets()
 	if ((mpeg_packets * MPEG_PACKET_SIZE + rtp_header_bytes) != recv_size)
 	{
 		printf(
-			"There are leftover bytes in this packet. [recv_size:%u] [mpeg_packets:%u] [rtp_header_size:%u]\n",
+			"There are leftover bytes in this packet. [recv_size:%ld] [mpeg_packets:%u] [rtp_header_size:%u]\n",
 			recv_size, mpeg_packets, rtp_header_bytes);
 	}
 
@@ -438,6 +438,12 @@ void process_file_packets(FILE* pFile)
 	}
 }
 
+void show_live_update()
+{
+	print_pid_histogram();
+}
+
+
 int main(int argc, char** argv)
 {
 	printf("TS Graph Tool - Kevin Moore - Built %s\n", __DATE__);
@@ -494,6 +500,11 @@ int main(int argc, char** argv)
 		uint64_t start_time = get_timestamp();
 		uint64_t timespan = NANOSEC_PER_SEC;
 		
+		#define UPDATE_INTERVAL_SECONDS 3
+		uint64_t update_interval = NANOSEC_PER_SEC; 
+		update_interval *= UPDATE_INTERVAL_SECONDS;
+		uint64_t next_update = start_time + update_interval;
+
 		// sets the capture duration in seconds 
 		timespan *= 15; 
 		
@@ -506,8 +517,12 @@ int main(int argc, char** argv)
 			if (packets_processed % 100 == 0) 
 				printf("Packets received = %u\n",packets_processed);
 
+			if (get_timestamp() > next_update)
+			{
+				show_live_update();
+				next_update += update_interval;
+			}
 		}	
-
 		
 		close(sd);
 		printf("Socket has been closed.\n");
@@ -517,7 +532,4 @@ int main(int argc, char** argv)
 		print_usage();
 		exit(1);
 	}	
-
-	print_pid_histogram();
-	write_pcrs_and_packet_times(p_pcr_filename);
 }
