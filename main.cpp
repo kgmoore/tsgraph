@@ -27,8 +27,8 @@ using namespace std;
 
 void print_usage()
 {
-	printf("USAGE: tsgraph FILE filename pcr_filename\n");
-	printf("   or  tsgraph NETWORK dest_ip dest_port interface_ip pcr_filename\n");
+	printf("USAGE: tsgraph FILE filename\n");
+	printf("   or  tsgraph NETWORK dest_ip dest_port interface_ip\n");
 }
 
 int sd;
@@ -461,11 +461,9 @@ int main(int argc, char** argv)
 		exit(1);
 	}
 
-	char* p_pcr_filename = 0;
-	
 	if (strcmp(argv[1], "FILE") == 0)
 	{
-		if (argc != 4)
+		if (argc != 3)
 		{
 			print_usage();
 			exit(1);
@@ -480,12 +478,10 @@ int main(int argc, char** argv)
 
 		process_file_packets(pFile);
 
-		p_pcr_filename = argv[3];
-
 	}
 	else if (strcmp(argv[1], "NETWORK") == 0)
 	{	
-		if (argc != 6)
+		if (argc != 5)
 		{
 			print_usage();
 			exit(1);
@@ -493,8 +489,6 @@ int main(int argc, char** argv)
 
 		open_network_connection(argv[2], argv[3], argv[4]);
 	
-		p_pcr_filename = argv[5];
-		
 		unsigned int packets_processed = 0;
 
 		uint64_t start_time = get_timestamp();
@@ -514,8 +508,6 @@ int main(int argc, char** argv)
 		{
 			read_ip_packets();
 			packets_processed++;
-			if (packets_processed % 100 == 0) 
-				printf("Packets received = %u\n",packets_processed);
 
 			if (get_timestamp() > next_update)
 			{
