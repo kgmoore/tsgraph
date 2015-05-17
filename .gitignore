@@ -27,6 +27,7 @@
 *.out
 *.app
 tsgraph
+serve_http
 
 # hidden files
 .*
