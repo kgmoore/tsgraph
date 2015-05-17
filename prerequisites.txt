@@ -2,3 +2,13 @@
 -- Need to install git://git.videolan.org/bitstream.git
 -- Need to add an exxplicit cast to a malloc return
 
+Adding the RestBed C++ REST server framework:
+* To use https://bitbucket.org/Corvusoft/restbed/wiki/Project%20Setup requires GCC 4.9
+* Installation instructions for Ubuntu 14.04 here: 
+** http://askubuntu.com/a/581497
+** Then this command was needed: cmake -DCMAKE_CXX_COMPILER=gcc-4.9 -DBUILD_TESTS=YES ..
+** I'm stuck building the framework sub project
+*** I used this to configure: cmake -DCMAKE_CXX_COMPILER=g++-4.9 -DBUILD_TESTS=YES ..
+*** And I get this on date_impl.cpp functions: 
+**** framework/detail/date_impl.cpp:21:12: error: ‘std::get_time’ has not been declared
+
