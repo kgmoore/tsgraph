@@ -2,4 +2,3 @@
 -- Need to install git://git.videolan.org/bitstream.git
 -- Need to add an exxplicit cast to a malloc return
 -- Need to add http://ftp.gnu.org/gnu/libmicrohttpd/libmicrohttpd-0.9.42.tar.gz
--- Need to add git clone https://bitbucket.org/Corvusoft/restbed.git
